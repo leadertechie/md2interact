@@ -1,0 +1,38 @@
+{
+  "name": "@leadertechie/md2interact",
+  "version": "0.0.0",
+  "description": "Browser-side Web Worker that reads the DOM for known interaction patterns declared in markdown frontmatter",
+  "type": "module",
+  "main": "dist/md2interact.js",
+  "module": "dist/md2interact.js",
+  "types": "dist/types.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "vite build --watch",
+    "build": "vite build",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "web-worker",
+    "interaction",
+    "markdown",
+    "dom",
+    "event-bus"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vite": "^5.4.0",
+    "vitest": "^1.6.0",
+    "jsdom": "^24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leadertechie/md2interact.git"
+  }
+}
