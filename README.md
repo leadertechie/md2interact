@@ -80,6 +80,13 @@ md2interact Web Worker starts
   │     ├── TYPE = "mfe"            → load external Micro Front-End from URL
   │     └── TYPE = "custom"         → load external module from URL
   │
+  ├── Fetch Proxy (BFF API Routing)
+  │     ├── MFE registers API patterns via registerAPI() or declarative HTML attrs
+  │     ├── Monkey-patches window.fetch to rewrite matching URLs
+  │     ├── Rewrites: /api/search → /hash/7fa3b2c1/api/search
+  │     ├── Passes through auth headers, cookies, body unchanged
+  │     └── Transparent to MFE code — no changes needed
+  │
   ├── CSS Hydration Engine
   │     ├── Inline critical CSS into <head>
   │     ├── Inject @layer structure
@@ -368,6 +375,51 @@ export default function(container: HTMLElement): (() => void) | void;
 
 ---
 
+## Fetch Proxy (BFF API Routing)
+
+The fetch proxy enables Micro Front-Ends to route API calls through the correct Cloudflare Worker (BFF) without knowing about the routing layer.
+
+### How it works
+
+1. **Registration** — An MFE registers its API pattern + BFF hash via `registerAPI()` (imperative) or `data-mfe-api`/`data-mfe-hash` attributes (declarative)
+2. **Interception** — `window.fetch` is monkey-patched to check all outgoing requests against registered patterns
+3. **Rewriting** — Matching URLs get rewritten: `/api/search?q=foo` → `/hash/7fa3b2c1/api/search?q=foo`
+4. **Routing** — The Cloudflare routing worker sees `/hash/` prefix, looks up the hash, proxies to the correct BFF worker
+5. **Transparency** — The MFE code does plain `fetch("/api/search?q=foo")` — no awareness of routing
+
+### Auth Headers
+
+The fetch proxy passes through all request properties unchanged — including `Authorization`, `Cookie`, and any custom headers. It only rewrites the URL path. Auth headers set by the page or MFE code are preserved exactly.
+
+```typescript
+import { registerAPI, getRegisteredRoutes } from '@leadertechie/md2interact';
+
+// Register API pattern for a BFF worker
+registerAPI("/api/search*", "7fa3b2c1");
+
+// Check registered routes
+console.log(getRegisteredRoutes());
+// → [{ pattern: "/api/search*", hash: "7fa3b2c1" }]
+```
+
+### Declarative Registration (HTML)
+
+```html
+<div data-interaction="mfe:search-widget"
+     data-mfe-src="/assets/mfe/search.js"
+     data-mfe-api="/api/search*"
+     data-mfe-hash="7fa3b2c1">
+</div>
+```
+
+### Exports
+
+```typescript
+export { registerAPI, uninstallFetchProxy, getRegisteredRoutes } from './fetch-proxy';
+```
+
+---
+
 ## Event Bus
 
 ### Purpose
@@ -462,6 +514,9 @@ Theme can also be toggled via a button with `data-theme-toggle` attribute:
 export { init, reinit, destroy } from './worker';
 export { bus } from './bus';
 export { toggleTheme } from './css-hydration';
+
+// Fetch Proxy (BFF API Routing)
+export { registerAPI, uninstallFetchProxy, getRegisteredRoutes } from './fetch-proxy';
 
 // Types
 export type {
