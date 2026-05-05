@@ -26,6 +26,7 @@ import { startInfiniteScroll } from './handlers/infinite-scroll';
 import { startFormLive } from './handlers/form-live';
 import { startMFE } from './handlers/mfe';
 import { startCustom } from './handlers/custom';
+import { installFetchProxy, uninstallFetchProxy } from './fetch-proxy';
 import type { CleanupFn, CSSHydrationOptions, InteractionType } from './types';
 
 /** Configuration options for md2interact */
@@ -63,6 +64,9 @@ export async function init(options: Md2InteractOptions = {}): Promise<void> {
   } = options;
 
   console.log('[md2interact] Initializing...');
+
+  // 0. Install the fetch proxy for BFF hash-based routing
+  installFetchProxy();
 
   // 1. Hydrate CSS
   await hydrateCSS(css);
@@ -137,6 +141,7 @@ export async function reinit(options: Md2InteractOptions = {}): Promise<void> {
  * Destroy all interactions and clean up.
  */
 export function destroy(): void {
+  uninstallFetchProxy();
   cleanupAll();
   bus.clear();
   console.log('[md2interact] Destroyed');
@@ -144,3 +149,5 @@ export function destroy(): void {
 
 // Export the event bus for external use
 export { bus };
+// Export the fetch proxy for MFE API registration
+export { registerAPI, uninstallFetchProxy, getRegisteredRoutes } from './fetch-proxy';

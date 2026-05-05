@@ -8,6 +8,7 @@
 
 import type { CleanupFn } from '../types';
 import { bus } from '../bus';
+import { registerAPI } from '../fetch-proxy';
 import { getInteractionName } from './shared';
 
 /** Attempt to call a mount function and return its cleanup */
@@ -22,6 +23,14 @@ function tryMount(
 
 /**
  * Start an mfe interaction on the given container element.
+ *
+ * Supports declarative API registration via HTML attributes:
+ *   data-mfe-api  — URL pattern to register (e.g., "/api/search*")
+ *   data-mfe-hash — FNV-1a hash of the BFF worker binding name
+ *
+ * MFEs can also register imperatively inside their init() via:
+ *   import { registerAPI } from '@leadertechie/md2interact';
+ *   registerAPI("/api/search*", "7fa3b2c1");
  */
 export async function startMFE(container: HTMLElement): Promise<CleanupFn> {
   const src = container.dataset.mfeSrc;
@@ -35,6 +44,21 @@ export async function startMFE(container: HTMLElement): Promise<CleanupFn> {
     props = JSON.parse(container.dataset.mfeProps || '{}');
   } catch {
     console.warn('[md2interact] mfe: invalid JSON in data-mfe-props');
+  }
+
+  // Declarative API registration from HTML attributes
+  const apiPattern = container.dataset.mfeApi;
+  const apiHash = container.dataset.mfeHash;
+  if (apiPattern && apiHash) {
+    registerAPI(apiPattern, apiHash);
+    console.log(`[md2interact] mfe: registered API "${apiPattern}" → hash ${apiHash} from declarative slot`);
+  }
+
+  // If only hash is provided without pattern, use default patterns for this worker
+  // This allows MFEs to be loaded without specifying the hash in MD
+  if (apiHash && !apiPattern) {
+    registerAPI("/mfe/*", apiHash);
+    console.log(`[md2interact] mfe: registered default API "/mfe/*" → hash ${apiHash} from declarative slot`);
   }
 
   try {
