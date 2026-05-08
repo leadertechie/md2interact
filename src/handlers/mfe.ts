@@ -2,14 +2,46 @@
  * Micro Front-End (MFE) interaction handler
  *
  * Loads a Micro Front-End component (React, Vue, Web Component) and mounts it.
+ *
+ * Props are collected from data-mfe-* attributes on the container element:
+ *   data-mfe-title="Toldby"           → props.title = "Toldby"
+ *   data-mfe-logo-src="/favicon.svg"  → props.logoSrc = "/favicon.svg"
+ *
+ * The context bus state is also passed as props.context so MFEs can
+ * access shared state without importing md2interact directly.
+ *
  * Emits 'mfe:mounted' event on the event bus.
- * Supports cleanup via mount function return value.
  */
 
 import type { CleanupFn } from '../types';
 import { bus } from '../bus';
+import { getAll } from '../context';
 import { registerAPI } from '../fetch-proxy';
 import { getInteractionName } from './shared';
+
+/** Convert kebab-case to camelCase: "logo-src" → "logoSrc" */
+function kebabToCamel(str: string): string {
+  return str.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+}
+
+/**
+ * Collect props from data-mfe-* attributes on the container.
+ * Excludes reserved keys: data-mfe-src, data-mfe-api, data-mfe-hash, data-mfe-props.
+ */
+function collectProps(container: HTMLElement): Record<string, unknown> {
+  const reserved = new Set(['mfeSrc', 'mfeApi', 'mfeHash', 'mfeProps']);
+  const props: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(container.dataset)) {
+    if (!key.startsWith('mfe') || reserved.has(key)) continue;
+    // Strip "mfe" prefix and camelCase: mfeLogoSrc → logoSrc, mfeLogoHref → logoHref
+    const propName = key.replace(/^mfe/, '');
+    const camel = propName.charAt(0).toLowerCase() + propName.slice(1);
+    props[camel] = value;
+  }
+
+  return props;
+}
 
 /** Attempt to call a mount function and return its cleanup */
 function tryMount(
@@ -28,9 +60,10 @@ function tryMount(
  *   data-mfe-api  — URL pattern to register (e.g., "/api/search*")
  *   data-mfe-hash — FNV-1a hash of the BFF worker binding name
  *
- * MFEs can also register imperatively inside their init() via:
- *   import { registerAPI } from '@leadertechie/md2interact';
- *   registerAPI("/api/search*", "7fa3b2c1");
+ * Props flow:
+ *   1. data-mfe-* attributes (e.g., data-mfe-title)
+ *   2. data-mfe-props (JSON string, overrides attribute props)
+ *   3. context: current state snapshot from the context bus
  */
 export async function startMFE(container: HTMLElement): Promise<CleanupFn> {
   const src = container.dataset.mfeSrc;
@@ -39,26 +72,32 @@ export async function startMFE(container: HTMLElement): Promise<CleanupFn> {
     return () => {};
   }
 
-  let props: Record<string, unknown> = {};
-  try {
-    props = JSON.parse(container.dataset.mfeProps || '{}');
-  } catch {
-    console.warn('[md2interact] mfe: invalid JSON in data-mfe-props');
+  // Layer 1: props from data-mfe-* attributes
+  let props = collectProps(container);
+
+  // Layer 2: explicit JSON props (overrides attribute props)
+  if (container.dataset.mfeProps) {
+    try {
+      const jsonProps = JSON.parse(container.dataset.mfeProps);
+      props = { ...props, ...jsonProps };
+    } catch {
+      console.warn('[md2interact] mfe: invalid JSON in data-mfe-props');
+    }
   }
+
+  // Layer 3: context bus state snapshot
+  props.context = getAll();
 
   // Declarative API registration from HTML attributes
   const apiPattern = container.dataset.mfeApi;
   const apiHash = container.dataset.mfeHash;
   if (apiPattern && apiHash) {
     registerAPI(apiPattern, apiHash);
-    console.log(`[md2interact] mfe: registered API "${apiPattern}" → hash ${apiHash} from declarative slot`);
+    console.log(`[md2interact] mfe: registered API "${apiPattern}" → hash ${apiHash}`);
   }
-
-  // If only hash is provided without pattern, use default patterns for this worker
-  // This allows MFEs to be loaded without specifying the hash in MD
   if (apiHash && !apiPattern) {
-    registerAPI("/mfe/*", apiHash);
-    console.log(`[md2interact] mfe: registered default API "/mfe/*" → hash ${apiHash} from declarative slot`);
+    registerAPI('/mfe/*', apiHash);
+    console.log(`[md2interact] mfe: registered default API "/mfe/*" → hash ${apiHash}`);
   }
 
   try {

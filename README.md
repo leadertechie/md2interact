@@ -2,7 +2,7 @@
 
 **Browser-side Web Worker that reads the DOM for known interaction patterns declared in markdown frontmatter.**
 
-`md2interact` is a client-side behavior engine. It scans `data-interaction` attributes in the DOM and wires up interactivity — polling, live updates, click toggles, infinite scroll, live forms, micro front-ends, and custom modules. It also handles CSS hydration (critical CSS inlining, `@layer` injection, theme toggling) and provides a lightweight event bus for cross-interaction communication.
+`md2interact` is a client-side behavior engine. It scans `data-interaction` attributes in the DOM and wires up interactivity — polling, live updates, click toggles, infinite scroll, live forms, micro front-ends, and custom modules. It also provides a shared reactive context bus (`put`/`get`/`subscribe`) for cross-MFE state, CSS hydration (critical CSS inlining, `@layer` injection, theme toggling), and a lightweight event bus for cross-interaction communication.
 
 It does NOT run on the edge. It does NOT know about page layout. It is purely a client-side behavior engine.
 
@@ -213,6 +213,54 @@ toggleTheme('light'); // Sets data-theme="light" on <html> + saves to localStora
 
 ---
 
+### MFE Context Bus (`put` / `get` / `subscribe`)
+
+Shared reactive state for all micro-frontends. Any MFE can `put(key, value)` and any other MFE can `get(key)` or `subscribe(callback)` to react to state changes.
+
+The initial state is seeded from a `<script type="application/json" data-mfe-context>` block in the composed MD:
+
+```html
+<script type="application/json" data-mfe-context>
+{
+  "appName": "Toldby",
+  "region": "*",
+  "theme": "light"
+}
+</script>
+```
+
+#### API
+
+```typescript
+import { put, get, getAll, subscribe } from '@leadertechie/md2interact';
+
+// Write shared state (notifies all subscribers)
+put("theme", "dark");
+
+// Read a single value
+const theme = get("theme"); // "dark"
+
+// Shallow copy of all state (mutation-safe)
+const all = getAll(); // { appName: "Toldby", theme: "dark" }
+
+// Subscribe to changes (called immediately with current state)
+const unsub = subscribe((state) => {
+  console.log("State changed:", state.theme);
+  document.documentElement.setAttribute("data-theme", state.theme);
+});
+
+// Unsubscribe
+unsub();
+```
+
+Also available on `window.__MFE_CONTEXT__` for non-module MFEs:
+
+```js
+window.__MFE_CONTEXT__.put("theme", "dark");
+window.__MFE_CONTEXT__.get("theme");
+window.__MFE_CONTEXT__.subscribe((state) => { ... });
+```
+
 ## Interaction Types
 
 ### `poll:NAME`
@@ -324,38 +372,49 @@ Intercept form submission, send via `fetch`, update UI without page reload. Emit
 
 ### `mfe:NAME`
 
-Loads a Micro Front-End component (React, Vue, Web Component) and mounts it. Emits `mfe:mounted` event on the bus.
+Loads a Micro Front-End component (React, Vue, Web Component) and mounts it.
+Emits `mfe:mounted` event on the bus.
+
+Any `data-mfe-*` attribute on the container (except reserved keys) is
+collected and passed as a prop.  For example `data-mfe-title="Toldby"`
+becomes `props.title = "Toldby"`.  The context bus state snapshot is also
+passed as `props.context`.
 
 ```html
-<div data-interaction="mfe:invite-form"
-     data-mfe-src="/assets/mfe/invite-form.js"
-     data-mfe-props='{"campaign": "beta"}'>
-  <div class="mfe-loading">Initializing form...</div>
+<div data-interaction="mfe:header-auth"
+     data-mfe-src="/assets/mfe/header-auth.js"
+     data-mfe-title="Toldby"
+     data-mfe-logo-src="/favicon.svg"
+     data-mfe-logo-href="/">
+  <a href="/">Toldby</a>
 </div>
 ```
 
 | Attribute | Required | Default | Description |
 |-----------|----------|---------|-------------|
 | `data-mfe-src` | ✅ | — | URL to the MFE JavaScript bundle |
-| `data-mfe-props` | ❌ | `{}` | JSON string of props to pass to the mount function |
+| `data-mfe-props` | ❌ | `{}` | JSON string of props (overrides `data-mfe-*` attrs) |
+| `data-mfe-*` | ❌ | — | Any other `data-mfe-` attr becomes a camelCase prop |
+
+**Props passed to `mount(container, props)`:**
+
+| Prop | Source | Example |
+|------|--------|---------|
+| `title` | `data-mfe-title` | `"Toldby"` |
+| `logoSrc` | `data-mfe-logo-src` | `"/favicon.svg"` |
+| `logoHref` | `data-mfe-logo-href` | `"/"` |
+| `context` | Context bus snapshot | `{ appName: "Toldby", theme: "light" }` |
+| (from JSON) | `data-mfe-props` | `{"campaign": "beta"}` |
 
 **Expected module export:**
 
 ```typescript
 // Named export
-export function mount(container: HTMLElement, props: Record<string, unknown>): void;
+export function mount(container: HTMLElement, props: Record<string, unknown>): () => void;
 
 // Or default export
-export default function(container: HTMLElement, props: Record<string, unknown>): void;
+export default function(container: HTMLElement, props: Record<string, unknown>): () => void;
 ```
-
-### `custom:NAME`
-
-Loads an external module from URL and calls its `init` function. The module can return a cleanup function.
-
-```html
-<div data-interaction="custom:my-widget"
-     data-custom-src="/assets/widgets/my-widget.js">
 </div>
 ```
 
@@ -515,11 +574,19 @@ export { init, reinit, destroy } from './worker';
 export { bus } from './bus';
 export { toggleTheme } from './css-hydration';
 
+// MFE Context Bus (shared reactive state)
+export { put, get, getAll, subscribe } from './context';
+
 // Fetch Proxy (BFF API Routing)
 export { registerAPI, uninstallFetchProxy, getRegisteredRoutes } from './fetch-proxy';
 
 // Types
 export type {
+  InteractionType, InteractionId, InteractionEvent,
+  EventHandler, CleanupFn, InteractionEntry,
+  CSSHydrationOptions,
+} from './types';
+```
   InteractionType, InteractionId, InteractionEvent,
   EventHandler, CleanupFn, InteractionEntry,
   CSSHydrationOptions, RetryState,
@@ -534,7 +601,7 @@ export type {
 - **Not a build tool** — no compilation needed
 - **Not a React/MDX replacement** — no JSX, no component imports
 - **Not a Lit/Render framework** — no component model, no shadow DOM
-- **Not a state manager** — only the lightweight event bus
+- **Not a state manager** — but provides a lightweight reactive context bus for shared MFE state
 - **Not edge-side** — runs only in the browser
 - **Not a fetch layer** — `r2tohtml` does that
 

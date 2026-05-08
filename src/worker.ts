@@ -2,7 +2,8 @@
  * md2interact — Browser-side Web Worker entry point
  *
  * Reads the DOM for known interaction patterns declared in markdown frontmatter
- * and wires them up. Handles interaction wiring, CSS hydration, and event bus.
+ * and wires them up. Handles interaction wiring, CSS hydration, event bus,
+ * and the MFE context bus for cross-component state sharing.
  *
  * Usage:
  *   <script type="module">
@@ -13,6 +14,7 @@
 
 import { scanDOM } from './scanner';
 import { bus } from './bus';
+import { initContext } from './context';
 import { hydrateCSS } from './css-hydration';
 import {
   registerInteraction,
@@ -54,7 +56,8 @@ const handlerMap: Record<string, HandlerFn> = {
 };
 
 /**
- * Initialize md2interact: scan DOM, wire interactions, hydrate CSS.
+ * Initialize md2interact: scan DOM, wire interactions, hydrate CSS,
+ * and seed the MFE context bus from <script data-mfe-context>.
  */
 export async function init(options: Md2InteractOptions = {}): Promise<void> {
   const {
@@ -65,16 +68,19 @@ export async function init(options: Md2InteractOptions = {}): Promise<void> {
 
   console.log('[md2interact] Initializing...');
 
-  // 0. Install the fetch proxy for BFF hash-based routing
+  // 0. Seed the MFE context bus from the DOM (before MFEs mount)
+  initContext();
+
+  // 1. Install the fetch proxy for BFF hash-based routing
   installFetchProxy();
 
-  // 1. Hydrate CSS
+  // 2. Hydrate CSS
   await hydrateCSS(css);
 
-  // 2. Scan DOM for interactions
+  // 3. Scan DOM for interactions
   const interactions = scanDOM(root as HTMLElement);
 
-  // 3. Wire each interaction
+  // 4. Wire each interaction
   const wirePromises: Promise<void>[] = [];
 
   interactions.forEach((container, key) => {
@@ -107,10 +113,10 @@ export async function init(options: Md2InteractOptions = {}): Promise<void> {
   // Wait for async interactions (MFE, custom) to finish
   await Promise.allSettled(wirePromises);
 
-  // 4. Start cleanup observer for memory leak prevention
+  // 5. Start cleanup observer for memory leak prevention
   const observer = startCleanupObserver(root as HTMLElement);
 
-  // 5. Handle SPA navigation re-scan
+  // 6. Handle SPA navigation re-scan
   if (reinitOnPopState) {
     const reinitHandler = (): void => {
       observer.disconnect();
@@ -151,3 +157,5 @@ export function destroy(): void {
 export { bus };
 // Export the fetch proxy for MFE API registration
 export { registerAPI, uninstallFetchProxy, getRegisteredRoutes } from './fetch-proxy';
+// Export the MFE context bus for shared state
+export { put, get, getAll, subscribe } from './context';
