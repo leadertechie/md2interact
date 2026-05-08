@@ -1,6 +1,6 @@
 {
   "name": "@leadertechie/md2interact",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "Browser-side Web Worker that reads the DOM for known interaction patterns declared in markdown frontmatter",
   "type": "module",
   "main": "dist/md2interact.js",
