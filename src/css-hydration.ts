@@ -86,29 +86,10 @@ async function inlineCriticalCSS(): Promise<void> {
  * Detects data-theme on <html> and provides toggle function.
  */
 function setupThemeToggle(): void {
-  // Restore saved theme from localStorage
+  // Restore saved theme from localStorage — applies any value generically
   const savedTheme = localStorage.getItem('theme');
-  if (savedTheme === 'dark' || savedTheme === 'light') {
+  if (savedTheme) {
     document.documentElement.dataset.theme = savedTheme;
   }
-
-  // Listen for theme toggle events from click-toggle interactions
-  document.addEventListener('click', (e) => {
-    const target = e.target as HTMLElement;
-    const toggleBtn = target.closest('[data-theme-toggle]') as HTMLElement | null;
-    if (toggleBtn) {
-      const currentTheme = document.documentElement.dataset.theme || 'light';
-      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-      toggleTheme(newTheme);
-    }
-  });
-}
-
-/**
- * Toggle the theme between light and dark.
- */
-export function toggleTheme(theme: 'light' | 'dark'): void {
-  document.documentElement.dataset.theme = theme;
-  localStorage.setItem('theme', theme);
 }
 

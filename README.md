@@ -538,18 +538,24 @@ Ensures CSS is loaded in correct layer order per CSS_CONSTITUTION:
 
 ### Theme Toggle
 
-Detects `data-theme="light|dark"` on `<html>` and swaps CSS variables:
+Hydrates the theme from localStorage on page load — reads the `"theme"` key and
+sets it as `<html data-theme="...">`. Any string value is accepted, making it
+compatible with any theme system (e.g., `"light"`, `"dark"`, `"system"`, `"sepia"`).
 
 ```typescript
-toggleTheme('dark');  // Sets data-theme="dark" on <html> + saves to localStorage
-toggleTheme('light'); // Sets data-theme="light" on <html> + saves to localStorage
+import { init } from '@leadertechie/md2interact';
+
+// Enable theme toggle hydration (default: true)
+await init({ css: { themeToggle: true } });
 ```
 
-Theme can also be toggled via a button with `data-theme-toggle` attribute:
-
-```html
-<button data-theme-toggle>Toggle Theme</button>
-```
+> **Note:** This is a generic hydration mechanism — it only reads/writes the
+> `"theme"` localStorage key and the `data-theme` attribute. Application-level
+> theme logic (theme values, toggle UI, theme-specific CSS) is handled by the
+> MFE components using the [context bus](#mfe-context-bus-put--get--subscribe).
+>
+> The legacy `[data-theme-toggle]` click handler was removed — use the context
+> bus (`put`/`get`/`subscribe`) for theme coordination across micro-frontends.
 
 ---
 
@@ -572,7 +578,6 @@ Theme can also be toggled via a button with `data-theme-toggle` attribute:
 // Core
 export { init, reinit, destroy } from './worker';
 export { bus } from './bus';
-export { toggleTheme } from './css-hydration';
 
 // MFE Context Bus (shared reactive state)
 export { put, get, getAll, subscribe } from './context';
@@ -585,11 +590,6 @@ export type {
   InteractionType, InteractionId, InteractionEvent,
   EventHandler, CleanupFn, InteractionEntry,
   CSSHydrationOptions,
-} from './types';
-```
-  InteractionType, InteractionId, InteractionEvent,
-  EventHandler, CleanupFn, InteractionEntry,
-  CSSHydrationOptions, RetryState,
 } from './types';
 ```
 
