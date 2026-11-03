@@ -55,32 +55,42 @@ const handlerMap: Record<string, HandlerFn> = {
   custom: (el) => startCustom(el),
 };
 
+// ── Module state ─────────────────────────────────────────────────
+// init() is idempotent: a second call replaces the previous wiring instead
+// of stacking a second copy of every interaction on the page.
+
+let activeObserver: MutationObserver | null = null;
+let navigationListenersInstalled = false;
+let currentOptions: Md2InteractOptions = {};
+let scanQueue: Promise<void> = Promise.resolve();
+
+function teardownInteractions(): void {
+  if (activeObserver) {
+    activeObserver.disconnect();
+    activeObserver = null;
+  }
+  cleanupAll();
+  bus.clear();
+}
+
 /**
- * Initialize md2interact: scan DOM, wire interactions, hydrate CSS,
- * and seed the MFE context bus from <script data-mfe-context>.
+ * Tear down any previous wiring, then scan the DOM and wire every
+ * interaction. Listeners are managed by init()/destroy(), not here.
  */
-export async function init(options: Md2InteractOptions = {}): Promise<void> {
-  const {
-    css = {},
-    root = document,
-    reinitOnPopState = true,
-  } = options;
+async function scanAndWire(options: Md2InteractOptions): Promise<void> {
+  const { css = {}, root = document } = options;
 
-  console.log('[md2interact] Initializing...');
+  teardownInteractions();
 
-  // 0. Seed the MFE context bus from the DOM (before MFEs mount)
+  // Seed the MFE context bus from the DOM (before MFEs mount)
   initContext();
 
-  // 1. Install the fetch proxy for BFF hash-based routing
+  // Install the fetch proxy for BFF hash-based routing
   installFetchProxy();
 
-  // 2. Hydrate CSS
   await hydrateCSS(css);
 
-  // 3. Scan DOM for interactions
   const interactions = scanDOM(root as HTMLElement);
-
-  // 4. Wire each interaction
   const wirePromises: Promise<void>[] = [];
 
   interactions.forEach((container, key) => {
@@ -113,43 +123,92 @@ export async function init(options: Md2InteractOptions = {}): Promise<void> {
   // Wait for async interactions (MFE, custom) to finish
   await Promise.allSettled(wirePromises);
 
-  // 5. Start cleanup observer for memory leak prevention
-  const observer = startCleanupObserver(root as HTMLElement);
+  // Start cleanup observer for memory leak prevention
+  activeObserver = startCleanupObserver(root as HTMLElement);
+}
 
-  // 6. Handle SPA navigation re-scan
-  if (reinitOnPopState) {
-    const reinitHandler = (): void => {
-      observer.disconnect();
-      cleanupAll();
-      init(options);
-    };
+/**
+ * Queue a scan so overlapping navigation events cannot wire the same
+ * interactions twice. Each scan tears down the result of the previous one.
+ */
+function enqueueScan(options: Md2InteractOptions): Promise<void> {
+  const run = (): Promise<void> => scanAndWire(options);
+  scanQueue = scanQueue.then(run, run);
+  return scanQueue;
+}
 
-    window.addEventListener('popstate', reinitHandler);
-    window.addEventListener('pageshow', (event) => {
-      if (event.persisted) reinitHandler();
-    });
+function rescan(): void {
+  if (!currentOptions.reinitOnPopState) return;
+  void enqueueScan(currentOptions);
+}
+
+function onPopState(): void {
+  rescan();
+}
+
+function onPageShow(event: PageTransitionEvent): void {
+  // Only restore from bfcache; a normal load already called init().
+  if (event.persisted) rescan();
+}
+
+function installNavigationListeners(): void {
+  if (!navigationListenersInstalled) {
+    window.addEventListener('popstate', onPopState);
+    window.addEventListener('pageshow', onPageShow);
+    navigationListenersInstalled = true;
   }
+}
+
+function removeNavigationListeners(): void {
+  if (!navigationListenersInstalled) return;
+  window.removeEventListener('popstate', onPopState);
+  window.removeEventListener('pageshow', onPageShow);
+  navigationListenersInstalled = false;
+}
+
+/**
+ * Initialize md2interact: scan DOM, wire interactions, hydrate CSS,
+ * and seed the MFE context bus from <script data-mfe-context>.
+ *
+ * Safe to call more than once: the previous wiring is cleaned up first.
+ */
+export async function init(options: Md2InteractOptions = {}): Promise<void> {
+  const reinitOnPopState = options.reinitOnPopState ?? true;
+  currentOptions = { ...options, reinitOnPopState };
+
+  console.log('[md2interact] Initializing...');
+
+  if (reinitOnPopState) {
+    installNavigationListeners();
+  } else {
+    removeNavigationListeners();
+  }
+
+  await enqueueScan(currentOptions);
 
   console.log('[md2interact] Initialized successfully');
 }
 
 /**
  * Re-scan the DOM for new interactions (useful after dynamic content insertion).
- * Alias for init() — cleans up first then re-initializes.
+ * Cleans up the previous wiring, then initializes again.
  */
 export async function reinit(options: Md2InteractOptions = {}): Promise<void> {
-  cleanupAll();
-  bus.clear();
-  await init(options);
+  const reinitOnPopState =
+    options.reinitOnPopState ?? currentOptions.reinitOnPopState ?? true;
+
+  currentOptions = { ...currentOptions, ...options, reinitOnPopState };
+
+  await enqueueScan(currentOptions);
 }
 
 /**
  * Destroy all interactions and clean up.
  */
 export function destroy(): void {
+  removeNavigationListeners();
+  teardownInteractions();
   uninstallFetchProxy();
-  cleanupAll();
-  bus.clear();
   console.log('[md2interact] Destroyed');
 }
 
@@ -159,3 +218,7 @@ export { bus };
 export { registerAPI, uninstallFetchProxy, getRegisteredRoutes } from './fetch-proxy';
 // Export the MFE context bus for shared state
 export { put, get, getAll, subscribe } from './context';
+
+// Export the scoped MFE mount for embedded renderers
+export { mountMFEs } from './scoped';
+export type { MountMFEsOptions } from './scoped';

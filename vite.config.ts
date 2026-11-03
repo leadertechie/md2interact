@@ -1,10 +1,10 @@
 import { defineConfig } from 'vite';
-import { resolve } from 'path';
+import { resolve } from 'node:path';
 
 export default defineConfig({
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/worker.ts'),
+      entry: resolve(import.meta.dirname, 'src/worker.ts'),
       name: 'md2interact',
       formats: ['es'],
       fileName: () => 'md2interact.js',
@@ -15,8 +15,7 @@ export default defineConfig({
     target: 'es2020',
     rollupOptions: {
       output: {
-        // Ensure the worker is a single self-contained file
-        inlineDynamicImports: true,
+        codeSplitting: false,
       },
     },
   },
