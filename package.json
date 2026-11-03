@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/md2interact.js",
   "module": "dist/md2interact.js",
-  "types": "dist/types.d.ts",
+  "types": "dist/worker.d.ts",
   "files": [
     "dist",
     "README.md",
@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "dev": "vite build --watch",
-    "build": "vite build",
+    "build": "vite build && tsc --emitDeclarationOnly",
     "test": "vitest run",
     "test:watch": "vitest"
   },

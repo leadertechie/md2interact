@@ -53,19 +53,24 @@ function tryMount(
   return typeof result === 'function' ? result : () => {};
 }
 
+export interface MFEScopedOptions {
+  /** Emit `mfe:mounted` on the global bus (document-level `init` only). */
+  emitMounted?: boolean;
+}
+
 /**
- * Start an mfe interaction on the given container element.
+ * Load and mount a single mfe: interaction, scoped to its container.
  *
- * Supports declarative API registration via HTML attributes:
- *   data-mfe-api  — URL pattern to register (e.g., "/api/search*")
- *   data-mfe-hash — FNV-1a hash of the BFF worker binding name
- *
- * Props flow:
- *   1. data-mfe-* attributes (e.g., data-mfe-title)
- *   2. data-mfe-props (JSON string, overrides attribute props)
- *   3. context: current state snapshot from the context bus
+ * Unlike startMFE, this variant does NOT touch the global fetch proxy, the
+ * global context bus, or the global event bus unless explicitly asked. It is
+ * safe for embedded renderers (e.g. a preview pipe) that must not clobber the
+ * host application's wiring.
  */
-export async function startMFE(container: HTMLElement): Promise<CleanupFn> {
+export async function startMFEScoped(
+  container: HTMLElement,
+  context: Record<string, unknown>,
+  options: MFEScopedOptions = {},
+): Promise<CleanupFn> {
   const src = container.dataset.mfeSrc;
   if (!src) {
     console.warn('[md2interact] mfe: missing data-mfe-src');
@@ -85,10 +90,43 @@ export async function startMFE(container: HTMLElement): Promise<CleanupFn> {
     }
   }
 
-  // Layer 3: context bus state snapshot
-  props.context = getAll();
+  // Layer 3: context snapshot provided by the caller
+  props.context = context;
 
-  // Declarative API registration from HTML attributes
+  try {
+    const mod = await import(/* @vite-ignore */ src);
+
+    if (typeof mod.mount === 'function') {
+      const cleanup = tryMount(mod.mount, container, props);
+      if (options.emitMounted) {
+        bus.emit('mfe:mounted', { name: getInteractionName(container) });
+      }
+      return cleanup;
+    }
+
+    if (typeof mod.default === 'function') {
+      const cleanup = tryMount(mod.default, container, props);
+      if (options.emitMounted) {
+        bus.emit('mfe:mounted', { name: getInteractionName(container) });
+      }
+      return cleanup;
+    }
+
+    console.warn(`[md2interact] mfe: "${src}" does not export a mount function`);
+  } catch (err) {
+    console.error(`[md2interact] mfe: failed to load "${src}":`, err);
+  }
+
+  return () => {};
+}
+
+/**
+ * Start an mfe interaction on the given container element (document-level).
+ *
+ * Also performs declarative BFF API registration from data-mfe-api /
+ * data-mfe-hash attributes.
+ */
+export async function startMFE(container: HTMLElement): Promise<CleanupFn> {
   const apiPattern = container.dataset.mfeApi;
   const apiHash = container.dataset.mfeHash;
   if (apiPattern && apiHash) {
@@ -100,26 +138,5 @@ export async function startMFE(container: HTMLElement): Promise<CleanupFn> {
     console.log(`[md2interact] mfe: registered default API "/mfe/*" → hash ${apiHash}`);
   }
 
-  try {
-    const mod = await import(/* @vite-ignore */ src);
-    const name = getInteractionName(container);
-
-    if (typeof mod.mount === 'function') {
-      const cleanup = tryMount(mod.mount, container, props);
-      bus.emit('mfe:mounted', { name });
-      return cleanup;
-    }
-
-    if (typeof mod.default === 'function') {
-      const cleanup = tryMount(mod.default, container, props);
-      bus.emit('mfe:mounted', { name });
-      return cleanup;
-    }
-
-    console.warn(`[md2interact] mfe: "${src}" does not export a mount function`);
-  } catch (err) {
-    console.error(`[md2interact] mfe: failed to load "${src}":`, err);
-  }
-
-  return () => {};
+  return startMFEScoped(container, getAll(), { emitMounted: true });
 }
